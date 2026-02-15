@@ -1,0 +1,266 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+"""Common functions that can be used to define rewards for the learning environment.
+
+The functions can be passed to the :class:`isaaclab.managers.RewardTermCfg` object to
+specify the reward function and its parameters.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import torch
+
+from isaaclab.envs import mdp
+from isaaclab.assets import Articulation, RigidObject
+from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers.manager_base import ManagerTermBase
+from isaaclab.managers.manager_term_cfg import RewardTermCfg
+from isaaclab.sensors import ContactSensor, RayCaster
+from isaaclab.utils.math import quat_apply_inverse, yaw_quat
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedRLEnv
+
+def track_lin_vel_xy_yaw_frame_exp(
+    env, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3])
+    lin_vel_error = torch.sum(
+        torch.square(env.command_manager.get_command(command_name)[:, :2] - vel_yaw[:, :2]), dim=1
+    )
+    return torch.exp(-lin_vel_error / std**2)
+
+
+def track_ang_vel_z_world_exp(
+    env, command_name: str, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    ang_vel_error = torch.square(env.command_manager.get_command(command_name)[:, 2] - asset.data.root_ang_vel_w[:, 2])
+    return torch.exp(-ang_vel_error / std**2)
+
+
+# ------------------------ feet ------------------ #
+
+def feet_air_time(
+    env: ManagerBasedRLEnv, command_name: str, sensor_cfg: SceneEntityCfg, threshold: float,max_time: float
+) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    reward = torch.sum(torch.clamp(last_air_time - threshold, min=0.0, max=max_time) * first_contact, dim=1)
+    cmd = env.command_manager.get_command(command_name)[:, :2]
+    reward *= torch.linalg.norm(cmd, dim=1) > 0.1
+    return reward
+
+
+
+# feet air time with stepwise reward  离散
+def feet_air_time_stepwise(
+    env: ManagerBasedRLEnv, 
+    command_name: str, 
+    sensor_cfg: SceneEntityCfg, 
+    min_time: float,    
+    max_time: float,  
+) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+    epsilon = 1e-6
+    denominator = max(max_time - min_time, epsilon)
+    reward_scale = torch.clamp((last_air_time - min_time) / denominator, min=0.0, max=1.0)
+    reward = torch.sum(reward_scale * first_contact, dim=1)
+    command_norm = torch.linalg.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    reward *= (command_norm > 0.1)
+    return reward
+
+
+# 脚在air time窗口内的奖励 稠密
+def feet_air_time_window(
+    env: ManagerBasedRLEnv, 
+    command_name: str, 
+    sensor_cfg: SceneEntityCfg, 
+    min_time: float = 0.1, 
+    max_time: float = 0.5, 
+    threshold: float = 1.0
+) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    foot_forces_z = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
+    is_truly_air = foot_forces_z < threshold
+    current_air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    in_window = (current_air_time > min_time) & (current_air_time < max_time) & is_truly_air
+    reward = torch.where(in_window, 1.0, 0.0)
+    command_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    return torch.sum(reward, dim=1) * (command_norm > 0.1)
+
+
+# 长时间接触超时惩罚
+def feet_contact_time_long(
+    env: ManagerBasedRLEnv, 
+    command_name: str, 
+    sensor_cfg: SceneEntityCfg,
+    max_time: float = 1.0, 
+    threshold: float = 1.0
+) -> torch.Tensor:
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    foot_forces_z = sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
+    current_contact_time = sensor.data.current_contact_time[:, sensor_cfg.body_ids]
+    is_overtime = current_contact_time > max_time 
+    is_truly_contact = foot_forces_z > threshold
+    violation = is_overtime & is_truly_contact
+    penalty_score = torch.sum(violation.float(), dim=1)
+    command_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    is_moving_command = command_norm > 0.1
+    return penalty_score * is_moving_command
+
+# 长时间悬空惩罚
+def feet_air_time_long(
+    env: ManagerBasedRLEnv, 
+    command_name: str, 
+    sensor_cfg: SceneEntityCfg,
+    max_time: float = 1.0, 
+    threshold: float = 1.0
+) -> torch.Tensor:
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    foot_forces_z = sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
+    current_air_time = sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    is_overtime = current_air_time > max_time 
+    is_truly_air = foot_forces_z < threshold
+    violation = is_overtime & is_truly_air
+    penalty_score = torch.sum(violation.float(), dim=1)
+    command_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+    is_moving_command = command_norm > 0.1
+    return penalty_score * is_moving_command
+
+def feet_air_time_long(
+    env: ManagerBasedRLEnv, 
+    command_name: str, 
+    sensor_cfg: SceneEntityCfg,
+    max_time: float = 1.0, 
+    threshold: float = 1.0
+) -> torch.Tensor:
+    sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    body_ids = sensor_cfg.body_ids
+    foot_forces_z = sensor.data.net_forces_w[:, body_ids, 2]
+    current_air_time = sensor.data.current_air_time[:, body_ids]
+    is_truly_air = foot_forces_z < threshold
+    overtime = torch.clip(current_air_time - max_time, min=0.0)
+    penalty_per_foot = overtime * is_truly_air.float()
+    penalty_score = torch.sum(penalty_per_foot, dim=1)
+    command = env.command_manager.get_command(command_name)
+    command_norm = torch.norm(command[:, :2], dim=1)
+    is_moving_command = (command_norm > 0.1).float()
+    return penalty_score * is_moving_command
+
+# 单步站立时间奖励
+def feet_air_time_positive_biped(env, command_name: str, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
+    contact_time = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids]
+    in_contact = contact_time > 0.0
+    in_mode_time = torch.where(in_contact, contact_time, air_time)
+    single_stance = torch.sum(in_contact.int(), dim=1) == 1
+    reward = torch.min(torch.where(single_stance.unsqueeze(-1), in_mode_time, 0.0), dim=1)[0]
+    reward = torch.clamp(reward, max=threshold)
+    reward *= torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1) > 0.1
+    return reward
+
+# 打滑
+def feet_slide(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
+    asset = env.scene[asset_cfg.name]
+    body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]
+    reward = torch.sum(body_vel.norm(dim=-1) * contacts, dim=1)
+    return reward
+
+# 接触
+def feet_contact(
+    env: ManagerBasedRLEnv, command_name: str, expect_contact_num: int, sensor_cfg: SceneEntityCfg
+) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+    contact_num = torch.sum(contact, dim=1)
+    reward = (contact_num != expect_contact_num).float()
+    reward *= torch.linalg.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
+    return reward
+
+# 踢脚
+def feet_stumble(env: ManagerBasedRLEnv, command_name: str,sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    forces_z = torch.abs(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2])
+    forces_xy = torch.linalg.norm(contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :2], dim=2)
+    reward = torch.any(forces_xy > 4 * forces_z, dim=1).float()
+    reward *= torch.linalg.norm(env.command_manager.get_command(command_name), dim=1) > 0.1
+    return reward
+
+
+# 髋关节偏移惩罚
+def hip_penalty(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """惩罚 HAA 关节偏离默认位置。"""
+    asset: Articulation = env.scene[asset_cfg.name]
+    haa_pos = asset.data.joint_pos[:, asset_cfg.joint_ids]
+    haa_default = asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    return torch.sum(torch.square(haa_pos - haa_default), dim=1)
+
+
+
+def base_height_l2_with_limit(
+    env: ManagerBasedRLEnv,
+    target_height: float,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    limit: list[float] = [-10.0, 10.0],
+) -> torch.Tensor:
+    asset: RigidObject = env.scene[asset_cfg.name]
+    sensor: RayCaster = env.scene[sensor_cfg.name]
+    terrain_height = torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+    terrain_height = torch.clamp(terrain_height, min=limit[0], max=limit[1])
+    adjusted_target_height = target_height + terrain_height
+    return torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
+
+
+
+# 镜像
+def joint_mirror(
+    env: ManagerBasedRLEnv, 
+    asset_cfg_a: SceneEntityCfg = SceneEntityCfg("robot"), 
+    asset_cfg_b: SceneEntityCfg = SceneEntityCfg("robot"),
+    std: float = 0.25  # 归一化系数，控制奖励的敏感度
+) -> torch.Tensor:
+    asset_a: Articulation = env.scene[asset_cfg_a.name]
+    asset_b: Articulation = env.scene[asset_cfg_b.name]
+    curr_joint_pos_a = asset_a.data.joint_pos[:, asset_cfg_a.joint_ids]
+    curr_joint_pos_b = asset_b.data.joint_pos[:, asset_cfg_b.joint_ids]
+    diff = curr_joint_pos_a - curr_joint_pos_b
+    squared_error = torch.sum(torch.square(diff), dim=-1)
+    reward = torch.exp(-squared_error / (std**2))
+    return reward
+
+
+def joint_power(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    asset: Articulation = env.scene[asset_cfg.name]
+    # compute the reward
+    reward = torch.sum(
+        torch.abs(asset.data.joint_vel[:, asset_cfg.joint_ids] * asset.data.applied_torque[:, asset_cfg.joint_ids]),
+        dim=1,
+    )
+    return reward
+
+def joint_pos_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    asset: Articulation = env.scene[asset_cfg.name]
+    diff = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    return torch.sum(torch.square(diff), dim=1)
+
+
+
+def stand_still_joint_deviation_l1(
+    env, command_name: str, command_threshold: float = 0.06, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    """Penalize offsets from the default joint positions when the command is very small."""
+    command = env.command_manager.get_command(command_name)
+    return mdp.joint_deviation_l1(env, asset_cfg) * (torch.norm(command[:, :2], dim=1) < command_threshold)
