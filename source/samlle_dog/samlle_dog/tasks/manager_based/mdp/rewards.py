@@ -98,7 +98,7 @@ def feet_air_time_window(
     return torch.sum(reward, dim=1) * (command_norm > 0.1)
 
 
-# 长时间接触超时惩罚
+# 长时间接触超时惩罚 
 def feet_contact_time_long(
     env: ManagerBasedRLEnv, 
     command_name: str, 
@@ -117,24 +117,47 @@ def feet_contact_time_long(
     is_moving_command = command_norm > 0.1
     return penalty_score * is_moving_command
 
-# 长时间悬空惩罚
-def feet_air_time_long(
+
+def feet_contact_time_short(
     env: ManagerBasedRLEnv, 
     command_name: str, 
     sensor_cfg: SceneEntityCfg,
-    max_time: float = 1.0, 
-    threshold: float = 1.0
+    min_time: float = 0.1, 
+    threshold: float = 1.0 # 判定悬空的力阈值
 ) -> torch.Tensor:
     sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    last_contact_time = sensor.data.last_contact_time[:, sensor_cfg.body_ids]
     foot_forces_z = sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
-    current_air_time = sensor.data.current_air_time[:, sensor_cfg.body_ids]
-    is_overtime = current_air_time > max_time 
-    is_truly_air = foot_forces_z < threshold
-    violation = is_overtime & is_truly_air
-    penalty_score = torch.sum(violation.float(), dim=1)
-    command_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
-    is_moving_command = command_norm > 0.1
-    return penalty_score * is_moving_command
+    is_in_air = foot_forces_z < threshold
+    violation_time = (min_time - last_contact_time).clip(min=0.0)
+    valid_history = last_contact_time > 0.001
+    penalty_per_foot = violation_time * is_in_air.float() * valid_history.float()
+    penalty_score = torch.sum(penalty_per_foot, dim=1)
+    command = env.command_manager.get_command(command_name)
+    command_norm = torch.norm(command[:, :2], dim=1)
+    is_moving = command_norm > 0.1
+    return penalty_score * is_moving.float()
+
+
+
+# 长时间悬空惩罚
+# def feet_air_time_long(
+#     env: ManagerBasedRLEnv, 
+#     command_name: str, 
+#     sensor_cfg: SceneEntityCfg,
+#     max_time: float = 1.0, 
+#     threshold: float = 1.0
+# ) -> torch.Tensor:
+#     sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+#     foot_forces_z = sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
+#     current_air_time = sensor.data.current_air_time[:, sensor_cfg.body_ids]
+#     is_overtime = current_air_time > max_time 
+#     is_truly_air = foot_forces_z < threshold
+#     violation = is_overtime & is_truly_air
+#     penalty_score = torch.sum(violation.float(), dim=1)
+#     command_norm = torch.norm(env.command_manager.get_command(command_name)[:, :2], dim=1)
+#     is_moving_command = command_norm > 0.1
+#     return penalty_score * is_moving_command
 
 def feet_air_time_long(
     env: ManagerBasedRLEnv, 
