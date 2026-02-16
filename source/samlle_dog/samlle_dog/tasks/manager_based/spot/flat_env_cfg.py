@@ -16,7 +16,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
-import isaaclab_tasks.manager_based.locomotion.velocity.config.spot.mdp as spot_mdp
+import samlle_dog.tasks.manager_based.spot.mdp as spot_mdp
 import isaaclab_tasks.manager_based.locomotion.velocity.mdp as mdp
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 
@@ -78,9 +78,6 @@ class SpotObservationsCfg:
         """Observations for policy group."""
 
         # `` observation terms (order preserved)
-        base_lin_vel = ObsTerm(
-            func=mdp.base_lin_vel, params={"asset_cfg": SceneEntityCfg("robot")}, noise=Unoise(n_min=-0.1, n_max=0.1)
-        )
         base_ang_vel = ObsTerm(
             func=mdp.base_ang_vel, params={"asset_cfg": SceneEntityCfg("robot")}, noise=Unoise(n_min=-0.1, n_max=0.1)
         )
@@ -99,6 +96,7 @@ class SpotObservationsCfg:
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
+            self.history_length = 3
             self.enable_corruption = False
             self.concatenate_terms = True
 
