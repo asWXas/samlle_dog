@@ -8,7 +8,7 @@
 from isaaclab.envs.mdp import *  # noqa: F401, F403
 
 from .curriculums import *  # noqa: F401, F403
-from .rewards_l import *  # noqa: F401, F403
-from .rewards_x import *  # noqa: F401, F403
+# from .rewards_l import *  # noqa: F401, F403
+from .rewards import *  # noqa: F401, F403
 from .terminations import *  # noqa: F401, F403
 

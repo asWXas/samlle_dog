@@ -12,7 +12,7 @@ from samlle_dog.tasks.manager_based.mdp.symmetry import anymal
 @configclass
 class UnitreeGo1RoughPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
-    max_iterations = 5000
+    max_iterations = 10000
     save_interval = 50
     experiment_name = "unitree_go1_rough"
     policy = RslRlPpoActorCriticCfg(

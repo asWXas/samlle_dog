@@ -10,7 +10,7 @@ from samlle_dog.tasks.manager_based.go1.velocity_env_cfg import LocomotionVeloci
 ##
 # Pre-defined configs
 ##
-from samlle_dog.asset.robot import UNITREE_GO1_CFG
+from samlle_dog.asset.robot import UNITREE_GO1_CFG,GO2_CFG,UNITREE_GO2_CFG
 
 
 @configclass
@@ -19,8 +19,8 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # post init of parent
         super().__post_init__()
 
-        self.scene.robot = UNITREE_GO1_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/trunk"
+        self.scene.robot = UNITREE_GO2_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/base"
         # scale down the terrains because the robot is small
         self.scene.terrain.terrain_generator.sub_terrains["boxes"].grid_height_range = (0.025, 0.1)
         self.scene.terrain.terrain_generator.sub_terrains["random_rough"].noise_range = (0.01, 0.06)
@@ -31,10 +31,10 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # event
         self.events.push_robot = None
-        self.events.add_base_mass.params["mass_distribution_params"] = (-1.0, 3.0)
-        self.events.add_base_mass.params["asset_cfg"].body_names = "trunk"
-        self.events.base_external_force_torque.params["asset_cfg"].body_names = "trunk"
-        self.events.reset_robot_joints.params["position_range"] = (1.0, 1.0)
+        self.events.add_base_mass.params["mass_distribution_params"] = (-5.0, 16.0)
+        self.events.add_base_mass.params["asset_cfg"].body_names = "base"
+        self.events.base_external_force_torque.params["asset_cfg"].body_names = "base"
+        self.events.reset_robot_joints.params["position_range"] = (0.8, 1.2)
         self.events.reset_base.params = {
             "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
             "velocity_range": {
@@ -52,7 +52,7 @@ class UnitreeGo1RoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
 
         # terminations
-        self.terminations.base_contact.params["sensor_cfg"].body_names = "trunk"
+        self.terminations.base_contact.params["sensor_cfg"].body_names = "base"
 
 
 @configclass
