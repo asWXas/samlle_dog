@@ -317,6 +317,43 @@ def foot_clearance_reward(
     return torch.exp(-torch.sum(reward, dim=1) / std)
 
 
+def scan_foot_clearance_reward(
+    env: ManagerBasedRLEnv,
+    sensor_cfgs: list[SceneEntityCfg], # 传入4个传感器的配置列表
+    asset_cfg: SceneEntityCfg,         # 传入Robot的配置(必须包含body_names)
+    target_height: float,
+    std: float,
+    tanh_mult: float,
+    limit: list[float] = [-100.0, 100.0]
+) -> torch.Tensor:
+    """
+    Reward based on 4 separate foot scanners in Isaac Lab.
+    
+    sensor_cfgs: list[SceneEntityCfg], # 传入4个传感器的配置列表
+    asset_cfg: SceneEntityCfg,  pre_order: bool = True
+    
+    顺序：FL, FR, RL, RR
+    
+    """
+    asset: RigidObject = env.scene[asset_cfg.name]
+    terrain_heights = []
+    for s_cfg in sensor_cfgs:
+        sensor: RayCaster = env.scene[s_cfg.name]
+        foot_terrain_z = torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
+        terrain_heights.append(foot_terrain_z)
+    terrain_height_batch = torch.stack(terrain_heights, dim=1)
+    terrain_height_batch = torch.clamp(terrain_height_batch, min=limit[0], max=limit[1])
+    foot_pos_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+    clearance = foot_pos_z - terrain_height_batch
+    foot_z_target_error = torch.square(clearance - target_height)
+    foot_vel_xy = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]
+    foot_velocity_tanh = torch.tanh(tanh_mult * torch.norm(foot_vel_xy, dim=2))
+    reward = foot_z_target_error * foot_velocity_tanh
+    return torch.exp(-torch.sum(reward, dim=1) / std)
+
+
+
+
 
 # --------------------------- Gait --------------------------- #
 

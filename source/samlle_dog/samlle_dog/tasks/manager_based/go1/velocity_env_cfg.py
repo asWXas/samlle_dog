@@ -135,6 +135,47 @@ class MySceneCfg(InteractiveSceneCfg):
         debug_vis=False,
         mesh_prim_paths=["/World/ground"],
     )
+    
+    FL_foot_scanner = RayCasterCfg(
+       prim_path="{ENV_REGEX_NS}/Robot/FL_foot",
+        update_period=0.02,
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.02)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=[0.1, 0.1]),
+        debug_vis=True,
+        mesh_prim_paths=["/World/ground"],
+    )
+    
+    FR_foot_scanner = RayCasterCfg(
+       prim_path="{ENV_REGEX_NS}/Robot/FR_foot",
+        update_period=0.02,
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.02)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=[0.1, 0.1]),
+        debug_vis=True,
+        mesh_prim_paths=["/World/ground"],
+    )
+    
+    RL_foot_scanner = RayCasterCfg(
+       prim_path="{ENV_REGEX_NS}/Robot/RL_foot",
+        update_period=0.02,
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.02)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=[0.1, 0.1]),
+        debug_vis=True,
+        mesh_prim_paths=["/World/ground"],
+    )
+    
+    RR_foot_scanner = RayCasterCfg(
+       prim_path="{ENV_REGEX_NS}/Robot/RR_foot",
+        update_period=0.02,
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.02)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.05, size=[0.1, 0.1]),
+        debug_vis=True,
+        mesh_prim_paths=["/World/ground"],
+    )
+
     contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
     # lights
     sky_light = AssetBaseCfg(
@@ -285,7 +326,7 @@ class EventCfg:
         mode="startup",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
-            "com_range": {"x": (-0.01, 0.05), "y": (-0.05, 0.05), "z": (-0.01, 0.01)},
+            "com_range": {"x": (-0.05, -0.075), "y": (-0.0, 0.00), "z": (-0.01, 0.01)},
         },
     )
 
@@ -353,10 +394,10 @@ class RewardsCfg:
 
     # -- task
     track_lin_vel_xy_exp = RewTerm(
-        func=mdp.track_lin_vel_xy_exp, weight=1.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_lin_vel_xy_exp, weight=2.0, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
     track_ang_vel_z_exp = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0.75, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+        func=mdp.track_ang_vel_z_exp, weight=1.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
     )
     
     # base_angular_velocity = RewTerm(
@@ -377,14 +418,14 @@ class RewardsCfg:
     dof_torques_limits = RewTerm(func=mdp.applied_torque_limits, weight=-0.0)
     undesired_contacts = RewTerm(
         func=mdp.undesired_contacts,
-        weight=-1.0,
+        weight=-1.5,
         params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*thigh"), "threshold": 1.0},
     )
     
     # -- look penalties
     base_height_l2 = RewTerm(
         func=mdp.base_height_l2_with_limit,
-        weight=-1.0,
+        weight=-2.0,
         params={
             "target_height": 0.35,
             "asset_cfg": SceneEntityCfg("robot", body_names="base"),
@@ -397,7 +438,7 @@ class RewardsCfg:
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
     hip_penalty = RewTerm(func=mdp.hip_penalty,
-        weight=-0.1,
+        weight=-0.5,
         params={
             "asset_cfg": SceneEntityCfg("robot", joint_names=".*_hip_joint"),
         }
@@ -407,73 +448,125 @@ class RewardsCfg:
     # -- feet class
     
     # -- feet time
-    feet_air_time = RewTerm(
-        func=mdp.feet_air_time,
-        weight=0.3,
+    # feet_air_time = RewTerm(
+    #     func=mdp.feet_air_time,
+    #     weight=0.3,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+    #         "command_name": "base_velocity",
+    #         "threshold": 0.3,
+    #         "max_time": 0.5,
+    #     },
+    # )
+    
+    # feet_air_time_stepwise = RewTerm(
+    #     func=mdp.feet_air_time_stepwise, # 离散
+    #     weight=0.2,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+    #         "command_name": "base_velocity",
+    #         "min_time": 0.1,
+    #         "max_time": 0.35,
+    #     },
+    # )
+    
+    # feet_air_time_window = RewTerm(
+    #     func=mdp.feet_air_time_window, # 连续
+    #     weight=0.1,
+    #     params={
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+    #         "command_name": "base_velocity",
+    #         "min_time": 0.05,
+    #         "max_time": 0.5, 
+    #     },
+    # )
+    
+    
+    air_time = RewTerm(
+        func=mdp.air_time_reward,
+        weight=1.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-            "command_name": "base_velocity",
-            "threshold": 0.3,
-            "max_time": 0.5,
+            "mode_time": 0.3,
+            "velocity_threshold": 0.5,
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
         },
     )
     
-    feet_air_time_stepwise = RewTerm(
-        func=mdp.feet_air_time_stepwise, # 离散
-        weight=0.2,
+    gait = RewTerm(
+        func=mdp.GaitReward,
+        weight=2.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-            "command_name": "base_velocity",
-            "min_time": 0.1,
-            "max_time": 0.35,
+            "std": 0.1,
+            "max_err": 0.2,
+            "velocity_threshold": 0.5,
+            "synced_feet_pair_names": (("FL_foot", "RR_foot"), ("FR_foot", "RL_foot")),
+            "asset_cfg": SceneEntityCfg("robot"),
+            "sensor_cfg": SceneEntityCfg("contact_forces"),
         },
     )
     
-    feet_air_time_window = RewTerm(
-        func=mdp.feet_air_time_window, # 连续
-        weight=0.1,
+    air_time_variance = RewTerm(
+        func=mdp.air_time_variance_penalty,
+        weight=-1.0,
+        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")},
+    )
+    
+    foot_clearance_scan_reward = RewTerm(
+        func=mdp.scan_foot_clearance_reward,
+        weight=1.0,
         params={
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-            "command_name": "base_velocity",
-            "min_time": 0.05,
-            "max_time": 0.5, 
+            # 1. 传感器列表：顺序必须与下方 robot body_names 解析出的顺序一致！
+            # 通常 Isaac Lab 解析顺序依赖于 USD 里的定义顺序，或者 body_names 列表的顺序
+            "sensor_cfgs": [
+                SceneEntityCfg("FL_foot_scanner"), 
+                SceneEntityCfg("FR_foot_scanner"),
+                SceneEntityCfg("RL_foot_scanner"),
+                SceneEntityCfg("RR_foot_scanner")
+            ],
+            "asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"],preserve_order=True),
+            
+            "target_height": 0.15,
+            "std": 0.1,
+            "tanh_mult": 2.0,
         },
     )
+    
     
     # -- time out
     
-    feet_contact_time_long = RewTerm(
-        func=mdp.feet_contact_time_long, # 接触超时
-        weight=-0.1,
-        params={
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-            "max_time": 1.0,
-            "threshold": 1.0,
-        },
-    )
+    # feet_contact_time_long = RewTerm(
+    #     func=mdp.feet_contact_time_long, # 接触超时
+    #     weight=-0.1,
+    #     params={
+    #         "command_name": "base_velocity",
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+    #         "max_time": 1.0,
+    #         "threshold": 1.0,
+    #     },
+    # )
 
-    feet_air_time_long = RewTerm(
-        func=mdp.feet_air_time_long, # 悬空超时
-        weight=-1.0,
-        params={
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-            "max_time": 0.7,
-            "threshold": 1.0,
-        },
-    )
+    # feet_air_time_long = RewTerm(
+    #     func=mdp.feet_air_time_long, # 悬空超时
+    #     weight=-0.1,
+    #     params={
+    #         "command_name": "base_velocity",
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+    #         "max_time": 0.7,
+    #         "threshold": 1.0,
+    #     },
+    # )
     
-    feet_contact_time_short = RewTerm(
-        func=mdp.feet_contact_time_short, # 接触时间过短
-        weight=-0.1,
-        params={
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-            "min_time": 0.2,
-            "threshold": 1.0,
-        },
-    )
+    # feet_contact_time_short = RewTerm(
+    #     func=mdp.feet_contact_time_short, # 接触时间过短
+    #     weight=-0.1,
+    #     params={
+    #         "command_name": "base_velocity",
+    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+    #         "min_time": 0.2,
+    #         "threshold": 1.0,
+    #     },
+    # )
     
     # -- feet other
     
@@ -517,8 +610,6 @@ class RewardsCfg:
     
     is_alive = RewTerm(func=mdp.is_alive, weight=0.0001)
     
-    
-    
     # done = RewTerm(func=mdp.is_terminated, weight=-5.0)
 
 
@@ -537,23 +628,23 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel)
-    feet_air_time_window = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "feet_air_time_window",
-            "weight": 0.0,
-            "num_steps": 80000, 
-        },
-    )
+    # feet_air_time_window = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={
+    #         "term_name": "feet_air_time_window",
+    #         "weight": 0.0,
+    #         "num_steps": 80000, 
+    #     },
+    # )
     
-    feet_air_time_stepwise = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "feet_air_time_stepwise",
-            "weight": 0.0,
-            "num_steps": 80000, 
-        },
-    )
+    # feet_air_time_stepwise = CurrTerm(
+    #     func=mdp.modify_reward_weight,
+    #     params={
+    #         "term_name": "feet_air_time_stepwise",
+    #         "weight": 0.0,
+    #         "num_steps": 80000, 
+    #     },
+    # )
     
 
 

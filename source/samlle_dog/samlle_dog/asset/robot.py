@@ -84,11 +84,11 @@ UNITREE_GO1_CFG = ArticulationCfg(
     actuators={
         "base_legs": DCMotorCfg(
             joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
-            effort_limit=33.5,
-            saturation_effort=33.5,
+            effort_limit=60.0,
+            saturation_effort=60.0,
             velocity_limit=21.0,
-            stiffness=30.0,
-            damping=0.75,
+            stiffness=60.0,
+            damping=1.0,
             friction=0.0,
         ),
     },
@@ -133,10 +133,10 @@ GO2_CFG = ArticulationCfg(
         "base_legs": DCMotorCfg(
             joint_names_expr=[".*_hip_joint", ".*_thigh_joint",".*_calf_joint"],
             effort_limit=60.0,
-            saturation_effort=600.0,
+            saturation_effort=60.0,
             velocity_limit=21.0,
             stiffness=60.0,
-            damping=1.5,
+            damping=1.0,
             friction=0.0,
         ),
     },
@@ -161,7 +161,7 @@ UNITREE_GO2_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.4),
+        pos=(0.0, 0.0, 2.0),
         joint_pos={
             ".*L_hip_joint": 0.0,
             ".*R_hip_joint": -0.0,
@@ -178,8 +178,8 @@ UNITREE_GO2_CFG = ArticulationCfg(
             effort_limit=60.0,
             saturation_effort=60.0,
             velocity_limit=21.0,
-            stiffness=45.0,
-            damping=0.75,
+            stiffness=60.0,
+            damping=1.0,
             friction=0.0,
         ),
     },
