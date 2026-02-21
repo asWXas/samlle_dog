@@ -356,21 +356,21 @@ class FootHeightReward(ManagerTermBase):
     def __init__(self, cfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
         
-        self.target_height: float = cfg.params.get("target_height", 0.05)
-        self.contact_force_threshold: float = cfg.params.get("force_thresh", 1.0)
-        self.cmd_threshold: float = cfg.params.get("cmd_thresh", 0.05)
-        self.command_name: str = cfg.params.get("command_name", "base_velocity")
-        self.dt = env.step_dt
-
+        # --- 1. 获取资源句柄 ---
         asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
         self.asset: RigidObject = env.scene[asset_cfg.name]
         
-        foot_indices, _ = self.asset.find_bodies(asset_cfg.body_names)
-        self.num_feet = len(foot_indices)
-        
         sensor_cfg: SceneEntityCfg = cfg.params["sensor_cfg"]
         self.contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+        
+        # --- 2. 初始化 Buffer ---
+        # 预计算脚的数量用于申请内存
+        # 注意：这里假设 asset_cfg.body_names 能解析出正确数量的脚
+        foot_indices, _ = self.asset.find_bodies(asset_cfg.body_names)
+        self.num_feet = len(foot_indices)
+        self.dt = env.step_dt
 
+        # 状态变量
         self.min_height = torch.zeros(env.num_envs, self.num_feet, device=env.device)
         self.max_height = torch.zeros(env.num_envs, self.num_feet, device=env.device)
         self.feet_air_time = torch.zeros(env.num_envs, self.num_feet, device=env.device)
@@ -395,47 +395,59 @@ class FootHeightReward(ManagerTermBase):
         command_name: str = "base_velocity"
     ) -> torch.Tensor:
         
+        # --- A. 获取数据 ---
+        # 1. 脚的高度 (World Frame)
         feet_height = self.asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+        
+        # 2. 接触力 (Z轴)
+        # 警告：确保 sensor_cfg.body_ids 的索引范围在 ContactSensor 数据张量范围内
         contact_force_z = self.contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
         
+        # --- B. 状态判定 ---
         is_contact = torch.abs(contact_force_z) > force_thresh
+        # 滤波：防止接触瞬间的抖动导致误判
         contact_filt = torch.logical_or(is_contact, self.last_contacts)
         
+        # 事件：刚落地 (First Contact) 和 刚起跳 (Just Lifted)
         first_contact = (self.feet_air_time > 0.0) & contact_filt
         just_lifted = (self.feet_air_time == 0.0) & (~contact_filt)
 
+        # --- C. 更新 Min/Max 追踪 ---
+        # 刚起跳时，重置 min/max 为当前高度
         self.min_height = torch.where(just_lifted, feet_height, self.min_height)
         self.max_height = torch.where(just_lifted, feet_height, self.max_height)
 
+        # 空中阶段，持续更新极值
         in_air = self.feet_air_time > 0.0
-        self.min_height = torch.where(
-            in_air, 
-            torch.minimum(self.min_height, feet_height), 
-            self.min_height
-        )
-        self.max_height = torch.where(
-            in_air, 
-            torch.maximum(self.max_height, feet_height), 
-            self.max_height
-        )
+        self.min_height = torch.where(in_air, torch.minimum(self.min_height, feet_height), self.min_height)
+        self.max_height = torch.where(in_air, torch.maximum(self.max_height, feet_height), self.max_height)
 
+        # --- D. 计算奖励 (仅在刚落地时触发) ---
         lift_height = self.max_height - self.min_height
         error = lift_height - target_height
+        
+        # 惩罚项：如果抬腿不够高，reward 为负；如果达标，reward 为 0
         reward_per_foot = torch.clamp(error, max=0.0)
+        
+        # 汇总：(N, 4) -> (N,)
         rew = torch.sum(reward_per_foot * first_contact, dim=1)
 
+        # --- E. 速度指令 Mask ---
+        # 防止机器人原地踏步刷分，只在有水平移动指令时给予奖励/惩罚
         commands = env.command_manager.get_command(command_name)
         moving = torch.norm(commands[:, :2], dim=1) > cmd_thresh
         rew *= moving
 
+        # --- F. 状态迭代 ---
         self.feet_air_time += self.dt
-        self.feet_air_time *= (~contact_filt) 
+        self.feet_air_time *= (~contact_filt) # 接触则清零
         self.last_contacts = is_contact
+        
+        # 接触期间清零 min/max，保持状态整洁 (非必须，但推荐)
         self.min_height *= (~contact_filt)
         self.max_height *= (~contact_filt)
 
         return rew
-
 
 # --------------------------- Gait --------------------------- #
 
