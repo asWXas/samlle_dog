@@ -352,7 +352,89 @@ def scan_foot_clearance_reward(
     return torch.exp(-torch.sum(reward, dim=1) / std)
 
 
+class FootHeightReward(ManagerTermBase):
+    def __init__(self, cfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        
+        self.target_height: float = cfg.params.get("target_height", 0.05)
+        self.contact_force_threshold: float = cfg.params.get("force_thresh", 1.0)
+        self.cmd_threshold: float = cfg.params.get("cmd_thresh", 0.05)
+        self.command_name: str = cfg.params.get("command_name", "base_velocity")
+        self.dt = env.step_dt
 
+        asset_cfg: SceneEntityCfg = cfg.params["asset_cfg"]
+        self.asset: RigidObject = env.scene[asset_cfg.name]
+        
+        foot_indices, _ = self.asset.find_bodies(asset_cfg.body_names)
+        self.num_feet = len(foot_indices)
+        
+        sensor_cfg: SceneEntityCfg = cfg.params["sensor_cfg"]
+        self.contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+        self.min_height = torch.zeros(env.num_envs, self.num_feet, device=env.device)
+        self.max_height = torch.zeros(env.num_envs, self.num_feet, device=env.device)
+        self.feet_air_time = torch.zeros(env.num_envs, self.num_feet, device=env.device)
+        self.last_contacts = torch.zeros(env.num_envs, self.num_feet, dtype=torch.bool, device=env.device)
+
+    def reset(self, env_ids: torch.Tensor | None = None):
+        if env_ids is None:
+            env_ids = slice(None)
+        self.min_height[env_ids] = 0.0
+        self.max_height[env_ids] = 0.0
+        self.feet_air_time[env_ids] = 0.0
+        self.last_contacts[env_ids] = False
+
+    def __call__(
+        self, 
+        env: ManagerBasedRLEnv,
+        asset_cfg: SceneEntityCfg,
+        sensor_cfg: SceneEntityCfg,
+        target_height: float = 0.05,
+        force_thresh: float = 1.0,
+        cmd_thresh: float = 0.05,
+        command_name: str = "base_velocity"
+    ) -> torch.Tensor:
+        
+        feet_height = self.asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+        contact_force_z = self.contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2]
+        
+        is_contact = torch.abs(contact_force_z) > force_thresh
+        contact_filt = torch.logical_or(is_contact, self.last_contacts)
+        
+        first_contact = (self.feet_air_time > 0.0) & contact_filt
+        just_lifted = (self.feet_air_time == 0.0) & (~contact_filt)
+
+        self.min_height = torch.where(just_lifted, feet_height, self.min_height)
+        self.max_height = torch.where(just_lifted, feet_height, self.max_height)
+
+        in_air = self.feet_air_time > 0.0
+        self.min_height = torch.where(
+            in_air, 
+            torch.minimum(self.min_height, feet_height), 
+            self.min_height
+        )
+        self.max_height = torch.where(
+            in_air, 
+            torch.maximum(self.max_height, feet_height), 
+            self.max_height
+        )
+
+        lift_height = self.max_height - self.min_height
+        error = lift_height - target_height
+        reward_per_foot = torch.clamp(error, max=0.0)
+        rew = torch.sum(reward_per_foot * first_contact, dim=1)
+
+        commands = env.command_manager.get_command(command_name)
+        moving = torch.norm(commands[:, :2], dim=1) > cmd_thresh
+        rew *= moving
+
+        self.feet_air_time += self.dt
+        self.feet_air_time *= (~contact_filt) 
+        self.last_contacts = is_contact
+        self.min_height *= (~contact_filt)
+        self.max_height *= (~contact_filt)
+
+        return rew
 
 
 # --------------------------- Gait --------------------------- #

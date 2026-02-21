@@ -506,67 +506,62 @@ class RewardsCfg:
         },
     )
     
-    air_time_variance = RewTerm(
-        func=mdp.air_time_variance_penalty,
-        weight=-1.0,
-        params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")},
-    )
     
-    foot_clearance_scan_reward = RewTerm(
-        func=mdp.scan_foot_clearance_reward,
-        weight=1.0,
-        params={
-            # 1. 传感器列表：顺序必须与下方 robot body_names 解析出的顺序一致！
-            # 通常 Isaac Lab 解析顺序依赖于 USD 里的定义顺序，或者 body_names 列表的顺序
-            "sensor_cfgs": [
-                SceneEntityCfg("FL_foot_scanner"), 
-                SceneEntityCfg("FR_foot_scanner"),
-                SceneEntityCfg("RL_foot_scanner"),
-                SceneEntityCfg("RR_foot_scanner")
-            ],
-            "asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"],preserve_order=True),
+    # foot_clearance_scan_reward = RewTerm(
+    #     func=mdp.scan_foot_clearance_reward,
+    #     weight=1.0,
+    #     params={
+    #         # 1. 传感器列表：顺序必须与下方 robot body_names 解析出的顺序一致！
+    #         # 通常 Isaac Lab 解析顺序依赖于 USD 里的定义顺序，或者 body_names 列表的顺序
+    #         "sensor_cfgs": [
+    #             SceneEntityCfg("FL_foot_scanner"), 
+    #             SceneEntityCfg("FR_foot_scanner"),
+    #             SceneEntityCfg("RL_foot_scanner"),
+    #             SceneEntityCfg("RR_foot_scanner")
+    #         ],
+    #         "asset_cfg": SceneEntityCfg("robot", body_names=["FL_foot", "FR_foot", "RL_foot", "RR_foot"],preserve_order=True),
             
-            "target_height": 0.15,
-            "std": 0.1,
-            "tanh_mult": 2.0,
-        },
-    )
+    #         "target_height": 0.15,
+    #         "std": 0.1,
+    #         "tanh_mult": 2.0,
+    #     },
+    # )
     
     
     # -- time out
     
-    # feet_contact_time_long = RewTerm(
-    #     func=mdp.feet_contact_time_long, # 接触超时
-    #     weight=-0.1,
-    #     params={
-    #         "command_name": "base_velocity",
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-    #         "max_time": 1.0,
-    #         "threshold": 1.0,
-    #     },
-    # )
+    feet_contact_time_long = RewTerm(
+        func=mdp.feet_contact_time_long, # 接触超时
+        weight=-0.1,
+        params={
+            "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+            "max_time": 1.0,
+            "threshold": 1.0,
+        },
+    )
 
-    # feet_air_time_long = RewTerm(
-    #     func=mdp.feet_air_time_long, # 悬空超时
-    #     weight=-0.1,
-    #     params={
-    #         "command_name": "base_velocity",
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-    #         "max_time": 0.7,
-    #         "threshold": 1.0,
-    #     },
-    # )
+    feet_air_time_long = RewTerm(
+        func=mdp.feet_air_time_long, # 悬空超时
+        weight=-0.1,
+        params={
+            "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+            "max_time": 0.7,
+            "threshold": 1.0,
+        },
+    )
     
-    # feet_contact_time_short = RewTerm(
-    #     func=mdp.feet_contact_time_short, # 接触时间过短
-    #     weight=-0.1,
-    #     params={
-    #         "command_name": "base_velocity",
-    #         "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
-    #         "min_time": 0.2,
-    #         "threshold": 1.0,
-    #     },
-    # )
+    feet_contact_time_short = RewTerm(
+        func=mdp.feet_contact_time_short, # 接触时间过短
+        weight=-0.1,
+        params={
+            "command_name": "base_velocity",
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*foot"),
+            "min_time": 0.2,
+            "threshold": 1.0,
+        },
+    )
     
     # -- feet other
     
